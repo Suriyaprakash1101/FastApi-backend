@@ -1,0 +1,502 @@
+
+# from fastapi import APIRouter, Depends, HTTPException, status, Header
+# from sqlalchemy.orm import Session
+# from sqlalchemy.exc import IntegrityError
+# from datetime import datetime, timedelta
+# from app.models.user import User
+# from app.models.refresh_token import RefreshToken
+# from app.Schemas.userSchema import UserBase, UserCreate, UserResponse, UserLogin
+# from app.Schemas.tokenSchema import Token, RefreshTokenRequest
+# from ...database import get_db
+# from app.utils.auth import (
+#     hash_password, verify_password, 
+#     create_access_token, create_refresh_token,
+#     decode_token, get_current_user_id
+# )
+# from uuid import UUID
+# from typing import Optional
+
+# router = APIRouter(prefix="/users", tags=["users"])
+
+# @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+# def register_user(user: UserCreate, db: Session = Depends(get_db)):
+#     # Check if user exists
+#     existing_user = db.query(User).filter(User.email == user.email).first()
+#     if existing_user:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Email already registered"
+#         )
+    
+#     # Create new user
+#     hashed_password = hash_password(user.password)
+#     db_user = User(
+#         email=user.email,
+#         name=user.name,
+#         password=hashed_password,
+#         address=user.address
+#     )
+    
+#     try:
+#         db.add(db_user)
+#         db.commit()
+#         db.refresh(db_user)
+#         return db_user
+#     except IntegrityError:
+#         db.rollback()
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="User could not be created"
+#         )
+
+# @router.post("/login", response_model=Token)
+# def login(user: UserLogin, db: Session = Depends(get_db)):
+#     # Authenticate user
+#     db_user = db.query(User).filter(User.email == user.email).first()
+    
+#     if not db_user or not verify_password(user.password, db_user.password):
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Invalid email or password"
+#         )
+    
+#     # Create tokens
+#     access_token = create_access_token(data={"sub": str(db_user.id)})
+#     refresh_token = create_refresh_token(data={"sub": str(db_user.id)})
+    
+#     # Store refresh token in database
+#     # First, revoke any existing refresh tokens for this user (optional but recommended)
+#     db.query(RefreshToken).filter(
+#         RefreshToken.user_id == db_user.id,
+#         RefreshToken.revoked.is_(None),
+#         RefreshToken.expires_at > datetime.utcnow()
+#     ).update({"revoked": datetime.utcnow()})
+    
+#     # Create new refresh token record
+#     refresh_token_expiry = datetime.utcnow() + timedelta(days=7)
+#     db_refresh_token = RefreshToken(
+#         user_id=db_user.id,
+#         token=refresh_token,
+#         expires_at=refresh_token_expiry
+#     )
+#     db.add(db_refresh_token)
+#     db.commit()
+    
+#     return {
+#         "access_token": access_token,
+#         "refresh_token": refresh_token,
+#         "token_type": "bearer"
+#     }
+
+# @router.post("/refresh", response_model=Token)
+# def refresh_token(request: RefreshTokenRequest, db: Session = Depends(get_db)):
+#     # Decode refresh token
+#     payload = decode_token(request.refresh_token)
+#     if not payload or payload.get("type") != "refresh":
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Invalid refresh token"
+#         )
+    
+#     user_id = payload.get("sub")
+#     if not user_id:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Invalid refresh token"
+#         )
+    
+#     # Check if token exists in database and is valid
+#     db_refresh_token = db.query(RefreshToken).filter(
+#         RefreshToken.token == request.refresh_token,
+#         RefreshToken.user_id == UUID(user_id),
+#         RefreshToken.revoked.is_(None)
+#     ).first()
+    
+#     if not db_refresh_token or db_refresh_token.is_expired():
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Refresh token expired or revoked"
+#         )
+    
+#     # Revoke the used refresh token (optional - implements one-time use)
+#     db_refresh_token.revoked = datetime.utcnow()
+    
+#     # Create new tokens
+#     new_access_token = create_access_token(data={"sub": user_id})
+#     new_refresh_token = create_refresh_token(data={"sub": user_id})
+    
+#     # Store new refresh token
+#     new_refresh_token_expiry = datetime.utcnow() + timedelta(days=7)
+#     new_db_refresh_token = RefreshToken(
+#         user_id=UUID(user_id),
+#         token=new_refresh_token,
+#         expires_at=new_refresh_token_expiry
+#     )
+#     db.add(new_db_refresh_token)
+#     db.commit()
+    
+#     return {
+#         "access_token": new_access_token,
+#         # "refresh_token": new_refresh_token,
+#         # "token_type": "bearer"
+#     }
+
+# @router.post("/logout")
+# def logout(refresh_token: str, db: Session = Depends(get_db)):
+#     # Revoke the refresh token
+#     db_refresh_token = db.query(RefreshToken).filter(
+#         RefreshToken.token == refresh_token,
+#         RefreshToken.revoked.is_(None)
+#     ).first()
+    
+#     if db_refresh_token:
+#         db_refresh_token.revoked = datetime.utcnow()
+#         db.commit()
+    
+#     return {"message": "Successfully logged out"}
+
+# @router.post("/logout-all")
+# def logout_all(current_user_id: UUID, db: Session = Depends(get_db)):
+#     # Revoke all refresh tokens for the user
+#     db.query(RefreshToken).filter(
+#         RefreshToken.user_id == current_user_id,
+#         RefreshToken.revoked.is_(None)
+#     ).update({"revoked": datetime.utcnow()})
+#     db.commit()
+    
+#     return {"message": "Logged out from all devices"}
+
+# # Protected route example
+# @router.get("/me", response_model=UserResponse)
+# def get_current_user(
+#     token: str,  # You'll get this from Authorization header
+#     db: Session = Depends(get_db)
+# ):
+#     user_id = get_current_user_id(token)
+#     if not user_id:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Invalid authentication credentials"
+#         )
+    
+#     user = db.query(User).filter(User.id == user_id).first()
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail="User not found"
+#         )
+#     return user
+
+# # Your existing CRUD endpoints remain the same...
+# @router.get("/{user_id}", response_model=UserResponse)
+# def get_user(user_id: str, db: Session = Depends(get_db)):
+#     try:
+#         user_uuid = UUID(user_id)
+#     except ValueError:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Invalid user ID format"
+#         )
+    
+#     user = db.query(User).filter(User.id == user_uuid).first()
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail="User not found"
+#         )
+#     return user
+
+# @router.get("/", response_model=list[UserResponse])
+# def get_all_users(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
+#     users = db.query(User).offset(skip).limit(limit).all()
+#     return users
+
+# @router.put("/{user_id}", response_model=UserResponse)
+# def update_user(user_id: str, user_update: UserBase, db: Session = Depends(get_db)):
+#     try:
+#         user_uuid = UUID(user_id)
+#     except ValueError:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Invalid user ID format"
+#         )
+    
+#     user = db.query(User).filter(User.id == user_uuid).first()
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail="User not found"
+#         )
+    
+#     for key, value in user_update.model_dump().items():
+#         setattr(user, key, value)
+    
+#     db.commit()
+#     db.refresh(user)
+#     return user
+
+# @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+# def delete_user(user_id: str, db: Session = Depends(get_db)):
+#     from uuid import UUID
+#     try:
+#         user_uuid = UUID(user_id)
+#     except ValueError:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Invalid user ID format"
+#         )
+    
+#     user = db.query(User).filter(User.id == user_uuid).first()
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail="User not found"
+#         )
+    
+#     # Also delete all refresh tokens for this user
+#     db.query(RefreshToken).filter(RefreshToken.user_id == user_uuid).delete()
+    
+#     db.delete(user)
+#     db.commit()
+#     return None
+
+# @router.put("/me/update", response_model=UserResponse)
+# def update_current_user(
+#     user_update: UserBase,
+#     db: Session = Depends(get_db),
+#     authorization: Optional[str] = Header(None)
+# ):
+#     # Extract token from "Bearer <token>"
+#     if not authorization or not authorization.startswith("Bearer "):
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Authorization header missing or invalid"
+#         )
+    
+#     token = authorization.split(" ")[1]
+    
+#     # Get current user from token
+#     user_id = get_current_user_id(token)
+#     if not user_id:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Invalid authentication credentials"
+#         )
+    
+#     # Find user in DB
+#     user = db.query(User).filter(User.id == user_id).first()
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail="User not found"
+#         )
+    
+#     # Update fields
+#     for key, value in user_update.model_dump(exclude_unset=True).items():
+#         setattr(user, key, value)
+    
+#     db.commit()
+#     db.refresh(user)
+#     return user
+
+from fastapi import APIRouter, Depends, HTTPException, status, Header
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timedelta
+from app.models.user import User
+from app.models.refresh_token import RefreshToken
+from app.Schemas.userSchema import UserBase, UserCreate, UserResponse, UserLogin
+from app.Schemas.tokenSchema import Token, RefreshTokenRequest
+from ...database import get_db
+from app.utils.auth import (
+    hash_password, verify_password,
+    create_access_token, create_refresh_token,
+    decode_token, get_current_user_id
+)
+from uuid import UUID
+from typing import Optional
+
+router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def register_user(user: UserCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(User.email == user.email).first()
+    if existing_user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    hashed_password = hash_password(user.password)
+    db_user = User(email=user.email, name=user.name, password=hashed_password, address=user.address)
+
+    try:
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        return db_user
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User could not be created")
+
+
+@router.post("/login", response_model=Token)
+def login(user: UserLogin, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.email == user.email).first()
+
+    if not db_user or not verify_password(user.password, db_user.password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    access_token = create_access_token(data={"sub": str(db_user.id)})
+    refresh_token = create_refresh_token(data={"sub": str(db_user.id)})
+
+    # Hard delete old tokens to keep only one record per user
+    db.query(RefreshToken).filter(RefreshToken.user_id == db_user.id).delete()
+
+    refresh_token_expiry = datetime.utcnow() + timedelta(days=7)
+    db_refresh_token = RefreshToken(user_id=db_user.id, token=refresh_token, expires_at=refresh_token_expiry)
+    db.add(db_refresh_token)
+    db.commit()
+
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
+
+@router.post("/refresh", response_model=Token)
+def refresh_token(request: RefreshTokenRequest, db: Session = Depends(get_db)):
+    payload = decode_token(request.refresh_token)
+    if not payload or payload.get("type") != "refresh":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    db_refresh_token = db.query(RefreshToken).filter(
+        RefreshToken.token == request.refresh_token,
+        RefreshToken.user_id == UUID(user_id),
+        RefreshToken.revoked.is_(None)
+    ).first()
+
+    if not db_refresh_token or db_refresh_token.is_expired():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired or revoked")
+
+    # Hard delete old token
+    db.delete(db_refresh_token)
+
+    new_access_token = create_access_token(data={"sub": user_id})
+    new_refresh_token = create_refresh_token(data={"sub": user_id})
+
+    new_db_refresh_token = RefreshToken(
+        user_id=UUID(user_id),
+        token=new_refresh_token,
+        expires_at=datetime.utcnow() + timedelta(days=7)
+    )
+    db.add(new_db_refresh_token)
+    db.commit()
+
+    return {"access_token": new_access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
+
+
+@router.post("/logout")
+def logout(refresh_token: str, db: Session = Depends(get_db)):
+    db_refresh_token = db.query(RefreshToken).filter(RefreshToken.token == refresh_token).first()
+    if db_refresh_token:
+        db.delete(db_refresh_token)
+        db.commit()
+    return {"message": "Successfully logged out"}
+
+
+@router.get("/me", response_model=UserResponse)
+def get_current_user(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authorization header missing or invalid")
+
+    token = authorization.split(" ")[1]
+    user_id = get_current_user_id(token)
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+@router.put("/me/update", response_model=UserResponse)
+def update_current_user(
+    user_update: UserBase,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None)
+):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authorization header missing or invalid")
+
+    token = authorization.split(" ")[1]
+    user_id = get_current_user_id(token)
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    for key, value in user_update.model_dump(exclude_unset=True).items():
+        setattr(user, key, value)
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+
+@router.get("/{user_id}", response_model=UserResponse)
+def get_user(user_id: str, db: Session = Depends(get_db)):
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format")
+
+    user = db.query(User).filter(User.id == user_uuid).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+@router.get("/", response_model=list[UserResponse])
+def get_all_users(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
+    users = db.query(User).offset(skip).limit(limit).all()
+    return users
+
+
+@router.put("/{user_id}", response_model=UserResponse)
+def update_user(user_id: str, user_update: UserBase, db: Session = Depends(get_db)):
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format")
+
+    user = db.query(User).filter(User.id == user_uuid).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    for key, value in user_update.model_dump().items():
+        setattr(user, key, value)
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: str, db: Session = Depends(get_db)):
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format")
+
+    user = db.query(User).filter(User.id == user_uuid).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    db.query(RefreshToken).filter(RefreshToken.user_id == user_uuid).delete()
+    db.delete(user)
+    db.commit()
+    return None
