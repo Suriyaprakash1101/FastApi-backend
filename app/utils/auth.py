@@ -5,6 +5,8 @@ from typing import Optional, Dict, Any
 from uuid import UUID
 import os
 import bcrypt
+from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
+from fastapi import Depends,HTTPException,status
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -13,7 +15,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production-please-use-environment-variable")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30  
-REFRESH_TOKEN_EXPIRE_DAYS = 7   
+REFRESH_TOKEN_EXPIRE_DAYS = 7    
 
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
@@ -57,3 +59,17 @@ def get_current_user_id(token: str) -> Optional[UUID]:
         if user_id:
             return UUID(user_id)
     return None
+
+
+security = HTTPBearer()
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> UUID:
+    token = credentials.credentials
+    user_id = get_current_user_id(token)  # this must return UUID, not User
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user_id 
