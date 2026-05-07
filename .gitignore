@@ -1,0 +1,25 @@
+# Byte-compiled / build files
+__pycache__/
+*.py[cod]
+*.so
+build/
+dist/
+*.egg-info/
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Environment variables (contains secrets)
+.env
+
+# IDE settings (e.g., for VSCode or PyCharm)
+.vscode/
+.idea/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
