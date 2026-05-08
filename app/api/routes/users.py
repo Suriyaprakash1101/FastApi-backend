@@ -59,7 +59,7 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     db.add(db_refresh_token)
     db.commit()
 
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token,"refresh_token":refresh_token, "token_type": "bearer"}
 
 
 @router.post("/refresh", response_model=Token)
@@ -95,7 +95,8 @@ def refresh_token(request: RefreshTokenRequest, db: Session = Depends(get_db)):
     db.add(new_db_refresh_token)
     db.commit()
 
-    return {"access_token": new_access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
+    return {"access_token": new_access_token,"refresh_token":new_refresh_token,"token_type": "bearer"}
+
 
 
 @router.post("/logout")
